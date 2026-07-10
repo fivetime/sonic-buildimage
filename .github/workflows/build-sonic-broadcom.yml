@@ -12,20 +12,14 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'sonic-buildimage release branch to build'
-        type: choice
+        # Free text so any current/future branch or tag works with no list to maintain.
+        # Alternatively you can drop this input entirely and use the web UI's native
+        # "Use workflow from" ref selector — but that requires this workflow file to also
+        # exist on the target branch, whereas free-text builds any branch from master.
+        description: 'branch/tag to build (any name, e.g. 202505, 202511, master)'
+        type: string
         default: '202505'
         required: true
-        options:
-          - '202211'
-          - '202305'
-          - '202311'
-          - '202405'
-          - '202411'
-          - '202505'
-          - '202511'
-          - '202605'
-          - 'master'
       platform:
         description: 'SONiC PLATFORM'
         default: 'broadcom'
@@ -107,34 +101,59 @@ jobs:
         run: |
           set -eux
           python3 - <<'PY'
-          import io
+          import re, sys
           p='scripts/build_mirror_config.sh'
           s=open(p).read(); orig=s
-          # buster+bullseye were lumped onto archive.debian.org for BOTH main and security,
-          # which 404s in 2026: buster IS fully archived, but bullseye security is still on
-          # the live mirror (LTS, not yet archived) while its backports are only on archive.
-          # --- non-snapshot branch ---
+          # PRISTINE 202505 lumps buster+bullseye onto archive.debian.org for MAIN only,
+          # leaving SECURITY at the global debian-archive.trafficmanager.net default, which
+          # 404s (EOL). Fixes (2026): buster is fully archived (main+security on archive,
+          # security suite 'buster/updates'); bullseye is still in LTS (main+backports on
+          # archive.debian.org/debian, but security only on the live deb.debian.org mirror).
+          # Match the pristine combined block (MAIN line only, no security line) and split it.
+          # --- non-snapshot branch (4-space indent) ---
           s=s.replace(
-          '''if [ "$DISTRIBUTION" == "buster" ] || [ "$DISTRIBUTION" == "bullseye" ]; then
-              DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/
-              DEFAULT_MIRROR_SECURITY_URLS=http://archive.debian.org/debian-security/
-          fi''',
-          '''if [ "$DISTRIBUTION" == "buster" ]; then
-              DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/
-              DEFAULT_MIRROR_SECURITY_URLS=http://archive.debian.org/debian-security/
-          fi
-          if [ "$DISTRIBUTION" == "bullseye" ]; then
-              DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/
-              DEFAULT_MIRROR_SECURITY_URLS=http://deb.debian.org/debian-security/
-          fi''',1)
-          # --- snapshot branch (tab-indented) ---
+          'if [ "$DISTRIBUTION" == "buster" ] || [ "$DISTRIBUTION" == "bullseye" ]; then\n    DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/\nfi',
+          'if [ "$DISTRIBUTION" == "buster" ]; then\n    DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/\n    DEFAULT_MIRROR_SECURITY_URLS=http://archive.debian.org/debian-security/\nfi\nif [ "$DISTRIBUTION" == "bullseye" ]; then\n    DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/\n    DEFAULT_MIRROR_SECURITY_URLS=http://deb.debian.org/debian-security/\nfi',1)
+          # --- snapshot branch (tab indent, MAIN line only) ---
           s=s.replace(
-          '\tif [ "$DISTRIBUTION" == "buster" ] || [ "$DISTRIBUTION" == "bullseye" ]; then\n\t\tDEFAULT_MIRROR_URLS=http://archive.debian.org/debian/,http://packages.trafficmanager.net/snapshot/debian/$DEBIAN_TIMESTAMP/\n\t\tDEFAULT_MIRROR_SECURITY_URLS=http://archive.debian.org/debian-security/,http://packages.trafficmanager.net/snapshot/debian-security/$DEBIAN_SECURITY_TIMESTAMP/\n\tfi',
+          '\tif [ "$DISTRIBUTION" == "buster" ] || [ "$DISTRIBUTION" == "bullseye" ]; then\n\t\tDEFAULT_MIRROR_URLS=http://archive.debian.org/debian/,http://packages.trafficmanager.net/snapshot/debian/$DEBIAN_TIMESTAMP/\n\tfi',
           '\tif [ "$DISTRIBUTION" == "buster" ]; then\n\t\tDEFAULT_MIRROR_URLS=http://archive.debian.org/debian/,http://packages.trafficmanager.net/snapshot/debian/$DEBIAN_TIMESTAMP/\n\t\tDEFAULT_MIRROR_SECURITY_URLS=http://archive.debian.org/debian-security/,http://packages.trafficmanager.net/snapshot/debian-security/$DEBIAN_SECURITY_TIMESTAMP/\n\tfi\n\tif [ "$DISTRIBUTION" == "bullseye" ]; then\n\t\tDEFAULT_MIRROR_URLS=http://archive.debian.org/debian/,http://packages.trafficmanager.net/snapshot/debian/$DEBIAN_TIMESTAMP/\n\t\tDEFAULT_MIRROR_SECURITY_URLS=http://deb.debian.org/debian-security/,http://packages.trafficmanager.net/snapshot/debian-security/$DEBIAN_SECURITY_TIMESTAMP/\n\tfi',1)
           open(p,'w').write(s)
           print("mirror patch changed:", s!=orig)
           PY
+          echo "=== resulting distro branches ==="
           grep -nE 'DISTRIBUTION|archive.debian|deb.debian.org/debian' scripts/build_mirror_config.sh
+          # GUARD: fail fast if the combined buster||bullseye block still exists (i.e. the
+          # patch did not match this branch's file format). Branches with no such block
+          # (bookworm/trixie-only) match nothing here and pass, which is correct.
+          if grep -qF '"buster" ] || [ "$DISTRIBUTION" == "bullseye"' scripts/build_mirror_config.sh; then
+            echo "ERROR: buster/bullseye mirror block was NOT split — patch did not match this branch's build_mirror_config.sh; update the patch." >&2
+            exit 1
+          fi
+
+      # ---- GitHub-hosted only: the runner ships Docker 28 (BuildKit-only; legacy builder
+      # removed). SONiC's collect_docker_version_files.sh cleans the version cache with
+      # `docker build -f Dockerfile.cleanup ... FROM sonic-slave-<dist>:<tag>` on a LOCAL,
+      # never-pushed image — Docker >=25 BuildKit tries to PULL it and fails (pull access
+      # denied). Ubuntu noble's docker.io=24.x still has the legacy builder that resolves
+      # local images, matching the proven-good build server. Pin to it. ----
+      - name: Pin Docker to 24 (noble) — BuildKit>=25 can't FROM local slave images
+        if: startsWith(github.event.inputs.runner_label, 'ubuntu')
+        run: |
+          set -eux
+          docker --version
+          sudo systemctl stop docker.service docker.socket || true
+          sudo apt-get purge -y docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin containerd.io || true
+          sudo apt-get update
+          sudo apt-get install -y --allow-downgrades --allow-change-held-packages docker.io
+          sudo apt-mark hold docker.io
+          sudo systemctl unmask docker.service docker.socket || true
+          sudo systemctl reset-failed docker.service docker.socket || true
+          sudo systemctl enable --now docker.socket
+          sudo systemctl start docker.service
+          sudo docker version
+          # legacy builder must be available (DOCKER_BUILDKIT=0 path)
+          DOCKER_BUILDKIT=0 docker build --help >/dev/null
 
       - name: make init
         env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
