@@ -37,6 +37,19 @@ class Sfp(SfpOptoeBase):
         """
         Retrieves the presence of the sfp
         """
+        if self.sfp_type == 'SFP':
+            presence_ctrl = self.sfp_control + 'sfpp_abs_sta'
+            if os.path.exists(presence_ctrl):
+                try:
+                    with open(presence_ctrl) as reg_file:
+                        reg_hex = reg_file.readline().rstrip()
+                    reg_value = int(reg_hex, 16)
+                    mask = (1 << (self.sfp_ctrl_idx - 10))
+                    return ((reg_value & mask) == 0)
+                except (IOError, ValueError):
+                    return False
+            return os.path.exists(self.eeprom_path) and os.path.getsize(self.eeprom_path) > 0
+
         presence_ctrl = self.sfp_control + 'qsfp_modprs'
         try:
             reg_file = open(presence_ctrl)
@@ -44,21 +57,10 @@ class Sfp(SfpOptoeBase):
             return False
 
         reg_hex = reg_file.readline().rstrip()
-
-        # content is a string containing the hex
-        # representation of the register
         reg_value = int(reg_hex, 16)
-
-        # Mask off the bit corresponding to our port
-        index = self.sfp_ctrl_idx
-
-        # Mask off the bit corresponding to our port
-        mask = (1 << index)
-
-        # ModPrsL is active low
+        mask = (1 << self.sfp_ctrl_idx)
         if ((reg_value & mask) == 0):
             return True
-
         return False
 
     def get_reset_status(self):

@@ -228,3 +228,9 @@ dport_map_port_4=31
 dport_map_port_3=32
 
 mmu_init_config="MSFT-TH-Tier1"
+# Z9100 10G SFP front-panel ports
+portmap_66=129:10
+portmap_100=131:10
+dport_map_port_66=129
+dport_map_port_100=130
+
