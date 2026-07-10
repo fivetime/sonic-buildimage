@@ -1,0 +1,172 @@
+name: build-sonic-broadcom
+
+# Self-compiles a SONiC Broadcom image WITH the MC-LAG control daemon (INCLUDE_ICCPD=y),
+# which the community/official images ship disabled. Produces target/sonic-broadcom.bin
+# as a downloadable artifact. One image flashes both Z9264F and Z9100 (same broadcom platform).
+#
+# Trigger manually from the Actions tab (workflow_dispatch).
+# runner_label: 'ubuntu-24.04' = GitHub-hosted (free, but disk/time are marginal — see notes);
+#               'self-hosted'  = your own registered runner (e.g. 10.224.0.22, proven-good).
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'sonic-buildimage release branch to build'
+        type: choice
+        default: '202505'
+        required: true
+        options:
+          - '202211'
+          - '202305'
+          - '202311'
+          - '202405'
+          - '202411'
+          - '202505'
+          - '202511'
+          - '202605'
+          - 'master'
+      platform:
+        description: 'SONiC PLATFORM'
+        default: 'broadcom'
+        required: true
+      runner_label:
+        description: "Runner: 'ubuntu-24.04' (GitHub-hosted) or 'self-hosted'"
+        default: 'ubuntu-24.04'
+        required: true
+      build_jobs:
+        description: 'SONIC_BUILD_JOBS (parallelism)'
+        default: '4'
+        required: true
+
+jobs:
+  build:
+    runs-on: ${{ github.event.inputs.runner_label }}
+    timeout-minutes: 350          # just under GitHub's 6h hard cap
+    steps:
+      # ---- GitHub-hosted only: reclaim disk (frees ~30GB of preinstalled toolchains) ----
+      - name: Free up disk space
+        if: startsWith(github.event.inputs.runner_label, 'ubuntu')
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false     # keep docker functional
+          swap-storage: true
+
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          submodules: recursive
+          fetch-depth: 1
+
+      # ---- GitHub-hosted only: push the biggest build outputs onto the 70GB /mnt disk ----
+      - name: Relocate heavy build dirs to /mnt
+        if: startsWith(github.event.inputs.runner_label, 'ubuntu')
+        run: |
+          set -eux
+          echo "docker version on runner:"; docker --version
+          # target/ (debs + docker-*.gz + squashfs + final .bin) and the per-slave inner
+          # docker data-roots (fsroot.docker.*) are the disk hogs. Symlink them to /mnt.
+          sudo mkdir -p /mnt/sonic-target && sudo chown "$USER" /mnt/sonic-target
+          ln -s /mnt/sonic-target target
+          for d in buster bullseye bookworm; do
+            sudo mkdir -p /mnt/fsroot.$d && sudo chown "$USER" /mnt/fsroot.$d
+            ln -s /mnt/fsroot.$d fsroot.docker.$d
+          done
+          df -h / /mnt
+
+      - name: Install host build prerequisites
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y python3-pip make
+          # Python 3.12 removed 'imp' -> j2cli breaks; jinjanator provides the 'j2' CLI
+          # that build_mirror_config.sh / prepare_docker_buildinfo.sh call on the host.
+          pip3 install --break-system-packages jinjanator || sudo pip3 install --break-system-packages jinjanator
+          j2 --version || true
+
+      - name: Enable INCLUDE_ICCPD (MC-LAG) and build options
+        run: |
+          set -eux
+          # rules/config.user overrides rules/config
+          cat > rules/config.user <<EOF
+          INCLUDE_ICCPD = y
+          SONIC_BUILD_JOBS = ${{ github.event.inputs.build_jobs }}
+          BUILD_SKIP_TEST = y
+          EOF
+          # also flip the default in rules/config in case config.user isn't honoured on this branch
+          sed -i 's/^INCLUDE_ICCPD ?*=.*/INCLUDE_ICCPD = y/' rules/config || true
+          grep -nE 'INCLUDE_ICCPD' rules/config rules/config.user
+
+      - name: Patch EOL Debian mirrors (buster archived; bullseye split)
+        run: |
+          set -eux
+          python3 - <<'PY'
+          import io
+          p='scripts/build_mirror_config.sh'
+          s=open(p).read(); orig=s
+          # buster+bullseye were lumped onto archive.debian.org for BOTH main and security,
+          # which 404s in 2026: buster IS fully archived, but bullseye security is still on
+          # the live mirror (LTS, not yet archived) while its backports are only on archive.
+          # --- non-snapshot branch ---
+          s=s.replace(
+          '''if [ "$DISTRIBUTION" == "buster" ] || [ "$DISTRIBUTION" == "bullseye" ]; then
+              DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/
+              DEFAULT_MIRROR_SECURITY_URLS=http://archive.debian.org/debian-security/
+          fi''',
+          '''if [ "$DISTRIBUTION" == "buster" ]; then
+              DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/
+              DEFAULT_MIRROR_SECURITY_URLS=http://archive.debian.org/debian-security/
+          fi
+          if [ "$DISTRIBUTION" == "bullseye" ]; then
+              DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/
+              DEFAULT_MIRROR_SECURITY_URLS=http://deb.debian.org/debian-security/
+          fi''',1)
+          # --- snapshot branch (tab-indented) ---
+          s=s.replace(
+          '\tif [ "$DISTRIBUTION" == "buster" ] || [ "$DISTRIBUTION" == "bullseye" ]; then\n\t\tDEFAULT_MIRROR_URLS=http://archive.debian.org/debian/,http://packages.trafficmanager.net/snapshot/debian/$DEBIAN_TIMESTAMP/\n\t\tDEFAULT_MIRROR_SECURITY_URLS=http://archive.debian.org/debian-security/,http://packages.trafficmanager.net/snapshot/debian-security/$DEBIAN_SECURITY_TIMESTAMP/\n\tfi',
+          '\tif [ "$DISTRIBUTION" == "buster" ]; then\n\t\tDEFAULT_MIRROR_URLS=http://archive.debian.org/debian/,http://packages.trafficmanager.net/snapshot/debian/$DEBIAN_TIMESTAMP/\n\t\tDEFAULT_MIRROR_SECURITY_URLS=http://archive.debian.org/debian-security/,http://packages.trafficmanager.net/snapshot/debian-security/$DEBIAN_SECURITY_TIMESTAMP/\n\tfi\n\tif [ "$DISTRIBUTION" == "bullseye" ]; then\n\t\tDEFAULT_MIRROR_URLS=http://archive.debian.org/debian/,http://packages.trafficmanager.net/snapshot/debian/$DEBIAN_TIMESTAMP/\n\t\tDEFAULT_MIRROR_SECURITY_URLS=http://deb.debian.org/debian-security/,http://packages.trafficmanager.net/snapshot/debian-security/$DEBIAN_SECURITY_TIMESTAMP/\n\tfi',1)
+          open(p,'w').write(s)
+          print("mirror patch changed:", s!=orig)
+          PY
+          grep -nE 'DISTRIBUTION|archive.debian|deb.debian.org/debian' scripts/build_mirror_config.sh
+
+      - name: make init
+        env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
+        run: make init
+
+      - name: make configure
+        env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
+        run: make configure PLATFORM=${{ github.event.inputs.platform }}
+
+      - name: make target/sonic-broadcom.bin
+        env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
+        run: |
+          make SONIC_BUILD_JOBS=${{ github.event.inputs.build_jobs }} \
+               target/sonic-${{ github.event.inputs.platform }}.bin
+          ls -la target/sonic-${{ github.event.inputs.platform }}.bin
+          sha256sum target/sonic-${{ github.event.inputs.platform }}.bin
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonic-${{ github.event.inputs.platform }}-bin
+          path: target/sonic-${{ github.event.inputs.platform }}.bin
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            target/**/*.log
+            sonic-slave-*/*.log
+          retention-days: 7
+          if-no-files-found: ignore
