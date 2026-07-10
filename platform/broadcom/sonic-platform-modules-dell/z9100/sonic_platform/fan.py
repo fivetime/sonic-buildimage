@@ -252,6 +252,20 @@ class Fan(FanBase):
             else:
                 return self.STATUS_LED_COLOR_OFF
 
+    def get_position_in_parent(self):
+        """
+        Retrieves 1-based relative physical position in parent device.
+        """
+        if self.is_psu_fan:
+            return 1
+        return self.fanindex
+
+    def is_replaceable(self):
+        """
+        Indicate whether this fan is replaceable.
+        """
+        return False
+
     def get_target_speed(self):
         """
         Retrieves the target (expected) speed of the fan
@@ -259,7 +273,10 @@ class Fan(FanBase):
             An integer, the percentage of full fan speed, in the range 0 (off)
                  to 100 (full speed)
         """
-        return  0
+        # Fan speeds are controlled by the Smart-Fusion FPGA.
+        # Return the current speed as the target to avoid a false
+        # thermalctld under/over-speed alarm.
+        return self.get_speed()
 
 
 

@@ -25,6 +25,17 @@ class Thermal(ThermalBase):
         'CPU Core 3'
         )
 
+    # Some sensors (e.g. the BCM switch-board sensor 'ASIC On-board Rear',
+    # SMF temp2/U44) are not populated with a max/crit threshold by the SMF
+    # firmware and read back 0. Fall back to sensible values mirrored from
+    # the identical 'BCM Switch On-Board #1' sibling sensor (SMF temp6/U38).
+    DEFAULT_HIGH_THRESHOLD = {
+        'ASIC On-board Rear': 80.0,
+    }
+    DEFAULT_HIGH_CRIT_THRESHOLD = {
+        'ASIC On-board Rear': 85.0,
+    }
+
     def __init__(self, thermal_index):
         ThermalBase.__init__(self)
         self.is_cpu_thermal = False
@@ -161,7 +172,10 @@ class Thermal(ThermalBase):
         else:
             thermal_high_threshold = 0
 
-        return thermal_high_threshold / 1000.0
+        value = thermal_high_threshold / 1000.0
+        if value == 0:
+            value = self.DEFAULT_HIGH_THRESHOLD.get(self.get_name(), 0.0)
+        return value
 
     def get_low_threshold(self):
         """
@@ -200,7 +214,10 @@ class Thermal(ThermalBase):
         else:
             thermal_high_crit_threshold = 0
 
-        return thermal_high_crit_threshold / 1000.0
+        value = thermal_high_crit_threshold / 1000.0
+        if value == 0:
+            value = self.DEFAULT_HIGH_CRIT_THRESHOLD.get(self.get_name(), 0.0)
+        return value
 
     def set_high_threshold(self, temperature):
         """
