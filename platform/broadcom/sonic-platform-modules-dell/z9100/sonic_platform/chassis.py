@@ -19,6 +19,7 @@ try:
     from sonic_platform.thermal import Thermal
     from sonic_platform.component import Component
     from sonic_platform.eeprom import Eeprom
+    from sonic_platform.watchdog import Watchdog
 except ImportError as e:
     raise ImportError(str(e) + "- required module not found")
 
@@ -107,6 +108,10 @@ class Chassis(ChassisBase):
 
         # Initialize EEPROM
         self._eeprom = Eeprom()
+        try:
+            self._watchdog = Watchdog()
+        except Exception:
+            self._watchdog = None
         for i in range(MAX_Z9100_FANTRAY):
             fandrawer = FanDrawer(i)
             self._fan_drawer_list.append(fandrawer)
