@@ -45,7 +45,8 @@ class Chassis(ChassisBase):
         16: [7, 34], 17: [7, 35], 18: [7, 36], 19: [7, 37],
         20: [7, 38], 21: [7, 39], 22: [7, 40], 23: [7, 41],
         24: [6, 42], 25: [6, 43], 26: [6, 44], 27: [6, 45],
-        28: [6, 46], 29: [6, 47], 30: [6, 48], 31: [6, 49]
+        28: [6, 46], 29: [6, 47], 30: [6, 48], 31: [6, 49],
+        32: [6, 11], 33: [6, 12]
     }
     PORT_I2C_MAPPING = {
         # 0th Index = i2cLine, 1st Index = portIdx in i2cLine
@@ -56,7 +57,8 @@ class Chassis(ChassisBase):
         16: [15, 4], 17: [15, 5], 18: [15, 6], 19: [15, 7],
         20: [15, 8], 21: [15, 9], 22: [16, 0], 23: [16, 1],
         24: [16, 2], 25: [16, 3], 26: [16, 4], 27: [16, 5],
-        28: [16, 6], 29: [16, 7], 30: [16, 8], 31: [16, 9]
+        28: [16, 6], 29: [16, 7], 30: [16, 8], 31: [16, 9],
+        32: [16, 10], 33: [16, 11]
     }
 
     OIR_FD_PATH = "/sys/devices/platform/dell_ich.0/sci_int_gpio_sus6"
@@ -78,7 +80,7 @@ class Chassis(ChassisBase):
         self.oir_fd = -1
         self.epoll = -1
         PORT_START = 0
-        PORT_END = 31
+        PORT_END = 33
         PORTS_IN_BLOCK = (PORT_END + 1)
 
         # sfp.py will read eeprom contents and retrive the eeprom data.
@@ -87,13 +89,20 @@ class Chassis(ChassisBase):
         # We pass the eeprom path and sfp control path from chassis.py
         # So that sfp.py implementation can be generic to all platforms
         eeprom_base = "/sys/bus/i2c/devices/i2c-{0}/i2c-{1}/{1}-0050/eeprom"
+        eeprom_base1 = "/sys/bus/i2c/devices/i2c-{0}/{0}-0050/eeprom"
         sfp_ctrl_base = "/sys/bus/i2c/devices/i2c-{0}/{0}-003e/"
         for index in range(0, PORTS_IN_BLOCK):
-            eeprom_path = eeprom_base.format(self.EEPROM_I2C_MAPPING[index][0],
-                                             self.EEPROM_I2C_MAPPING[index][1])
-            sfp_control = sfp_ctrl_base.format(self.PORT_I2C_MAPPING[index][0])
-            sfp_node = Sfp(index, 'QSFP', eeprom_path, sfp_control,
-                           self.PORT_I2C_MAPPING[index][1])
+            if index <= 31:
+                eeprom_path = eeprom_base.format(self.EEPROM_I2C_MAPPING[index][0],
+                                                 self.EEPROM_I2C_MAPPING[index][1])
+                sfp_control = sfp_ctrl_base.format(self.PORT_I2C_MAPPING[index][0])
+                sfp_node = Sfp(index, 'QSFP', eeprom_path, sfp_control,
+                               self.PORT_I2C_MAPPING[index][1])
+            else:
+                eeprom_path = eeprom_base1.format(self.EEPROM_I2C_MAPPING[index][1])
+                sfp_control = sfp_ctrl_base.format(self.PORT_I2C_MAPPING[index][0])
+                sfp_node = Sfp(index, 'SFP', eeprom_path, sfp_control,
+                               self.PORT_I2C_MAPPING[index][1])
             self._sfp_list.append(sfp_node)
 
         # Initialize EEPROM
@@ -211,6 +220,18 @@ class Chassis(ChassisBase):
             sys.stderr.write("SFP index {} out of range (1-{})\n".format(
                              index, len(self._sfp_list)-1))
         return sfp
+
+    def get_status_led(self):
+        return self.STATUS_LED_COLOR_GREEN
+
+    def set_status_led(self, color):
+        return True
+
+    def initizalize_system_led(self):
+        return None
+
+    def initialize_system_led(self):
+        return self.initizalize_system_led()
 
     def get_status(self):
         """
