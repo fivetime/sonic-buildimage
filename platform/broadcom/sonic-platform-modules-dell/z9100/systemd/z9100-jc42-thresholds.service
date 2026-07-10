@@ -1,0 +1,11 @@
+[Unit]
+Description=Set Dell Z9100 jc42 temp sensor thresholds
+After=systemd-modules-load.service lm-sensors.service pmon.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/z9100-jc42-thresholds.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

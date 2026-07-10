@@ -13,3 +13,6 @@ z9100/systemd/platform-modules-z9100.service etc/systemd/system
 z9100/systemd/z9100-lpc-monitor.service etc/systemd/system
 common/fw-updater usr/local/bin
 common/onie_mode_set usr/local/bin
+z9100/scripts/z9100-jc42-thresholds.sh usr/local/bin
+z9100/systemd/z9100-jc42-thresholds.service etc/systemd/system
+z9100/systemd/watchdog-control.service.d/10-skip-if-no-watchdog.conf etc/systemd/system/watchdog-control.service.d
