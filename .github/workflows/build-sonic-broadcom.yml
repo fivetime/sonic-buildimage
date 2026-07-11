@@ -191,6 +191,14 @@ jobs:
           # legacy builder must be available (DOCKER_BUILDKIT=0 path)
           DOCKER_BUILDKIT=0 docker build --help >/dev/null
 
+      - name: Fix scapy submodule version (PEP440-valid; avoid git-hash on fresh checkout)
+        run: |
+          if [ -d src/scapy ]; then
+            echo "2.4.5" > src/scapy/scapy/VERSION
+            git -C src/scapy tag -f v2.4.5 HEAD 2>/dev/null || true
+            echo "scapy VERSION => $(cat src/scapy/scapy/VERSION); describe => $(git -C src/scapy describe --always 2>&1)"
+          fi
+
       - name: make init
         env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
         run: make init
