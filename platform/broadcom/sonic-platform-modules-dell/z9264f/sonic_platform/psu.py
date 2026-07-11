@@ -87,6 +87,27 @@ class Psu(PsuBase):
         """
         return self.fru.get_board_serial()
 
+    def get_mfr_id(self):
+        """
+        Retrieves the Manufacturer Id of PSU
+
+        Returns:
+            A string, the manufacturer id.
+        """
+        return self.fru.get_board_mfr_id()
+
+    def get_type(self):
+        """
+        Retrieves the power type of PSU
+
+        Returns:
+            A string, PSU power type
+        """
+        info = self.fru.get_board_product().split(',')
+        if 'AC' in info: return 'AC'
+        if 'DC' in info: return 'DC'
+        return 'Unknown'
+
     def get_status(self):
         """
         Retrieves the operational status of the PSU
@@ -115,6 +136,25 @@ class Psu(PsuBase):
             voltage = 0
 
         return float(voltage)
+
+    def get_voltage_low_threshold(self):
+        """
+        Returns PSU low threshold in Volts
+        """
+        # The Z9264F BMC exposes bogus placeholder voltage thresholds
+        # (LowerCritical=0, UpperCritical=240) for the PSU output rail, so
+        # do not trust IPMI here; use the 12V-rail limits DellEMC platforms
+        # fall back to (see s5232f/s5248f/... psu.py).
+        return 11.6
+
+    def get_voltage_high_threshold(self):
+        """
+        Returns PSU high threshold in Volts
+        """
+        # See get_voltage_low_threshold: IPMI thresholds are placeholders on
+        # this platform; return the 12V-rail high limit used by sibling
+        # DellEMC platforms.
+        return 12.8
 
     def get_current(self):
         """
