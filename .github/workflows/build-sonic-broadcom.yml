@@ -59,18 +59,28 @@ jobs:
           fetch-depth: 1
 
       # ---- GitHub-hosted only: push the biggest build outputs onto the 70GB /mnt disk ----
-      - name: Relocate heavy build dirs to /mnt
+      - name: Relocate heavy build dirs to /mnt (bind mounts, NOT symlinks)
         if: startsWith(github.event.inputs.runner_label, 'ubuntu')
         run: |
           set -eux
           echo "docker version on runner:"; docker --version
           # target/ (debs + docker-*.gz + squashfs + final .bin) and the per-slave inner
-          # docker data-roots (fsroot.docker.*) are the disk hogs. Symlink them to /mnt.
-          sudo mkdir -p /mnt/sonic-target && sudo chown "$USER" /mnt/sonic-target
-          ln -s /mnt/sonic-target target
+          # docker data-roots (fsroot.docker.*) are the disk hogs. Move them to /mnt.
+          # MUST use bind mounts, NOT symlinks: `make configure` and the build run inside
+          # sonic-slave-* containers that rbind-mount the workspace but NOT /mnt, so a
+          # `target -> /mnt/...` symlink dangles in-container and versions_manager.py's
+          # os.makedirs('./target/versions') dies with FileNotFoundError (make configure
+          # Error 2). A bind mount is a real dir entry that docker's recursive bind carries
+          # into the slave container.
+          sudo mkdir -p /mnt/sonic-target
+          mkdir -p target
+          sudo mount --bind /mnt/sonic-target target
+          sudo chown "$USER" target
           for d in buster bullseye bookworm; do
-            sudo mkdir -p /mnt/fsroot.$d && sudo chown "$USER" /mnt/fsroot.$d
-            ln -s /mnt/fsroot.$d fsroot.docker.$d
+            sudo mkdir -p /mnt/fsroot.$d
+            mkdir -p fsroot.docker.$d
+            sudo mount --bind /mnt/fsroot.$d fsroot.docker.$d
+            sudo chown "$USER" fsroot.docker.$d
           done
           df -h / /mnt
 
@@ -130,6 +140,32 @@ jobs:
             echo "ERROR: buster/bullseye mirror block was NOT split — patch did not match this branch's build_mirror_config.sh; update the patch." >&2
             exit 1
           fi
+
+      - name: Patch docker.com CDN install (tolerate inconsistent apt index in image rootfs)
+        run: |
+          set -eux
+          # build_debian.sh installs docker-ce/cli/containerd into the image's Debian rootfs
+          # from download.docker.com, whose CloudFront apt index (InRelease vs Packages) is
+          # briefly inconsistent during a Docker publish -> `apt-get update` size-mismatch
+          # aborts the whole image build. Make it tolerant: fall back to installing the pinned
+          # debs straight from the immutable pool (system deps still resolve from the mirror).
+          python3 - <<'PY'
+          p='build_debian.sh'
+          s=open(p).read()
+          old=('sudo LANG=C chroot $FILESYSTEM_ROOT apt-get update\n'
+               'sudo LANG=C chroot $FILESYSTEM_ROOT apt-get -y install docker-ce=${DOCKER_VERSION} docker-ce-cli=${DOCKER_VERSION} containerd.io=${CONTAINERD_IO_VERSION}')
+          new=('sudo LANG=C chroot $FILESYSTEM_ROOT apt-get update || echo "[WARN] docker.list apt-get update failed (docker.com CDN inconsistent); installing docker debs directly from pool"\n'
+               'DOCKER_POOL_URL="https://download.docker.com/linux/debian/dists/${IMAGE_DISTRO}/pool/stable/${CONFIGURED_ARCH}"\n'
+               'DOCKER_VERSION_NOEPOCH="${DOCKER_VERSION#*:}"\n'
+               'for _dfile in "containerd.io_${CONTAINERD_IO_VERSION}_${CONFIGURED_ARCH}.deb" "docker-ce-cli_${DOCKER_VERSION_NOEPOCH}_${CONFIGURED_ARCH}.deb" "docker-ce_${DOCKER_VERSION_NOEPOCH}_${CONFIGURED_ARCH}.deb" ; do\n'
+               '    sudo https_proxy=$https_proxy LANG=C chroot $FILESYSTEM_ROOT curl -fsSL --retry 5 --retry-delay 3 -o "/tmp/${_dfile}" "${DOCKER_POOL_URL}/${_dfile}"\n'
+               'done\n'
+               'sudo LANG=C chroot $FILESYSTEM_ROOT apt-get -y install "/tmp/containerd.io_${CONTAINERD_IO_VERSION}_${CONFIGURED_ARCH}.deb" "/tmp/docker-ce-cli_${DOCKER_VERSION_NOEPOCH}_${CONFIGURED_ARCH}.deb" "/tmp/docker-ce_${DOCKER_VERSION_NOEPOCH}_${CONFIGURED_ARCH}.deb"')
+          if old in s:
+              open(p,'w').write(s.replace(old,new,1)); print("build_debian.sh docker CDN patch: APPLIED")
+          else:
+              print("build_debian.sh docker CDN patch: pattern not found (already patched or branch differs) — skipped")
+          PY
 
       # ---- GitHub-hosted only: the runner ships Docker 28 (BuildKit-only; legacy builder
       # removed). SONiC's collect_docker_version_files.sh cleans the version cache with
