@@ -18,7 +18,7 @@ Z9264F_FANS_PER_FANTRAY = 2
 
 
 class FanDrawer(FanDrawerBase):
-    """DellEMC Platform-specific Fan class"""
+    """DellEMC Platform-specific Fan Drawer class"""
 
     def __init__(self, fantray_index):
 
@@ -35,3 +35,65 @@ class FanDrawer(FanDrawerBase):
             string: The name of the device
         """
         return "FanTray{}".format(self.fantrayindex)
+
+    def get_presence(self):
+        """
+        Retrieves the presence of the fan drawer.
+        A fan tray is present when its first fan is detected.
+        """
+        return self.get_fan(0).get_presence()
+
+    def get_model(self):
+        """
+        Retrieves the part number of the fan drawer.
+        """
+        return self.get_fan(0).get_model()
+
+    def get_serial(self):
+        """
+        Retrieves the serial number of the fan drawer.
+        """
+        return self.get_fan(0).get_serial()
+
+    def get_status(self):
+        """
+        Retrieves the operational status of the fan drawer.
+        """
+        return self.get_fan(0).get_status()
+
+    def get_position_in_parent(self):
+        """
+        Retrieves 1-based relative physical position in parent device.
+        """
+        return self.fantrayindex
+
+    def is_replaceable(self):
+        """
+        Indicate whether this fan drawer is replaceable.
+        """
+        return True
+
+    def set_status_led(self, color):
+        """
+        Set led to expected color. Fan LEDs are controlled by the BMC;
+        return True to avoid a spurious thermalctld alarm.
+        """
+        return True
+
+    def get_status_led(self):
+        """
+        Gets the state of the fan drawer status LED.
+        """
+        if self.get_presence():
+            if self.get_fan(0).get_status():
+                return self.STATUS_LED_COLOR_GREEN
+            else:
+                return self.STATUS_LED_COLOR_AMBER
+        else:
+            return self.STATUS_LED_COLOR_OFF
+
+    def get_maximum_consumed_power(self):
+        """
+        Retrieves the maximum power drawn by this fan drawer.
+        """
+        return 54.0

@@ -1004,3 +1004,5 @@ dport_map_port_100=66
 
 module_64ports=1
 mmu_init_config="MSFT-TH2-Tier1"
+scache_filename=/tmp/brcm_bcm_scache
+stable_size=0x8000000
