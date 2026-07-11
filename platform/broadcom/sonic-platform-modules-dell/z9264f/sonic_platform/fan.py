@@ -175,3 +175,17 @@ class Fan(FanBase):
         else:
             speed = (100 * fan_speed)//self.max_speed
         return speed
+
+    def get_target_speed(self):
+        """Retrieves the target (expected) speed of the fan."""
+        # Fan speed is BMC-controlled; report the current speed as the
+        # target to avoid a false thermalctld under/over-speed alarm.
+        return self.get_speed()
+
+    def get_position_in_parent(self):
+        """Retrieves 1-based relative physical position in parent device."""
+        return self.fanindex
+
+    def is_replaceable(self):
+        """Indicate whether this fan is replaceable."""
+        return False

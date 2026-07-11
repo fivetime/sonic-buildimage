@@ -303,3 +303,47 @@ class Chassis(ChassisBase):
             return (self.REBOOT_CAUSE_HARDWARE_OTHER, "Reset Button Cold Reboot")
         else:
             return (self.REBOOT_CAUSE_NON_HARDWARE, None)
+
+    # System status LED API. The Z9264F front-panel system LED has no
+    # proven direct-write path from SONiC, so keep a software state so that
+    # healthd/system-health can set and read the status LED without error.
+    SYSTEM_LED_STATE_FILE = "/run/z9264-system-led-state"
+
+    def initizalize_system_led(self):
+        if not os.path.exists(self.SYSTEM_LED_STATE_FILE):
+            self.set_status_led(self.STATUS_LED_COLOR_GREEN)
+        return True
+
+    def initialize_system_led(self):
+        return self.initizalize_system_led()
+
+    def set_status_led(self, color):
+        color = str(color).lower()
+        aliases = {
+            "blinking_green": self.STATUS_LED_COLOR_GREEN,
+            "green_blink": self.STATUS_LED_COLOR_GREEN,
+            "red": self.STATUS_LED_COLOR_AMBER,
+        }
+        color = aliases.get(color, color)
+        valid = {
+            self.STATUS_LED_COLOR_GREEN,
+            self.STATUS_LED_COLOR_AMBER,
+            self.STATUS_LED_COLOR_RED,
+            self.STATUS_LED_COLOR_OFF,
+        }
+        if color not in valid:
+            return False
+        try:
+            with open(self.SYSTEM_LED_STATE_FILE, "w") as fd:
+                fd.write(color)
+            return True
+        except Exception:
+            return False
+
+    def get_status_led(self):
+        try:
+            with open(self.SYSTEM_LED_STATE_FILE) as fd:
+                color = fd.read().strip()
+            return color if color else self.STATUS_LED_COLOR_GREEN
+        except Exception:
+            return self.STATUS_LED_COLOR_GREEN
