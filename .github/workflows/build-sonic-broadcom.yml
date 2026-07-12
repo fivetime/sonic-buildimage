@@ -37,6 +37,8 @@ jobs:
   build:
     runs-on: ${{ github.event.inputs.runner_label }}
     timeout-minutes: 350          # just under GitHub's 6h hard cap
+    permissions:
+      contents: write            # gh release create needs write access to publish the .bin
     steps:
       # ---- GitHub-hosted only: reclaim disk (frees ~30GB of preinstalled toolchains) ----
       - name: Free up disk space
@@ -230,6 +232,26 @@ jobs:
           path: target/sonic-${{ github.event.inputs.platform }}.bin
           retention-days: 14
           if-no-files-found: error
+
+      # Publish the built .bin to GitHub Releases. Tag + filename are globally unique
+      # per build (run_number is monotonic; UTC stamp + short SHA) so two builds never
+      # clobber each other's asset.
+      - name: Publish image to GitHub Releases
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          PLATFORM='${{ github.event.inputs.platform }}'
+          BRANCH='${{ github.event.inputs.branch }}'
+          SHORT="$(git rev-parse --short HEAD)"
+          STAMP="$(date -u +%Y%m%d-%H%M%S)"
+          TAG="img-${PLATFORM}-${BRANCH}-${STAMP}-r${{ github.run_number }}-${SHORT}"
+          ASSET="sonic-${PLATFORM}-${BRANCH}-${STAMP}-${SHORT}.bin"
+          cp "target/sonic-${PLATFORM}.bin" "$ASSET"
+          SHA256="$(sha256sum "$ASSET" | awk '{print $1}')"
+          gh release create "$TAG" "$ASSET" --repo "${{ github.repository }}" --title "SONiC ${PLATFORM} ${BRANCH} @ ${SHORT} (${STAMP} UTC)" --notes "INCLUDE_ICCPD=y (MC-LAG). branch=${BRANCH} platform=${PLATFORM} commit=${SHORT} run=${{ github.run_id }} sha256=${SHA256}"
+          echo "Published $ASSET as release $TAG"
 
       - name: Upload build logs on failure
         if: failure()
