@@ -200,6 +200,12 @@ jobs:
             echo "scapy describe => $desc"
             case "$desc" in v2.4.5*) : ;; *) echo "ERROR: scapy tag not applied (describe=$desc)"; exit 1 ;; esac
           fi
+          if [ -d src/sonic-frr/frr ]; then
+            git -C src/sonic-frr/frr update-ref refs/remotes/origin/frr-10.3 HEAD
+            fr="$(git -C src/sonic-frr/frr rev-parse --verify -q origin/frr-10.3 || echo MISSING)"
+            echo "frr origin/frr-10.3 => $fr"
+            case "$fr" in MISSING) echo "ERROR: frr origin ref not created"; exit 1 ;; esac
+          fi
 
       - name: make init
         env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
