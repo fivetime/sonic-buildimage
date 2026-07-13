@@ -189,3 +189,10 @@ class Fan(FanBase):
     def is_replaceable(self):
         """Indicate whether this fan is replaceable."""
         return False
+
+    def set_status_led(self, color):
+        """
+        Set led to expected color. Fan LEDs are controlled by the BMC;
+        return True to avoid a spurious thermalctld alarm.
+        """
+        return True
