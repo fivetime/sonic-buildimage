@@ -7,8 +7,8 @@ name: build-sonic-vpp
 # build MUST checkout submodules recursively (else platform/vpp is an empty dir).
 # The whole image is produced through THIS sonic-buildimage fork with PLATFORM=vpp.
 #
-# This is NOT the broadcom flow: different PLATFORM, different target, NOBULLSEYE=1
-# NOBUSTER=1 (bookworm-only slaves), and no INCLUDE_ICCPD / Dell platform patches.
+# This is NOT the broadcom flow: different PLATFORM, different target, and a
+# Trixie-only (Debian 13) build with no INCLUDE_ICCPD / Dell platform patches.
 # The result is a VM image to run SONiC as a virtual router / soft-switch on x86.
 #
 # KVM CAVEAT: baking target/sonic-vpp.img.gz spins up a qemu VM to install onto a
@@ -91,7 +91,7 @@ jobs:
           mkdir -p target
           sudo mount --bind /mnt/sonic-target target
           sudo chown "$USER" target
-          for d in buster bullseye bookworm; do
+          for d in buster bullseye bookworm trixie; do
             sudo mkdir -p /mnt/fsroot.$d
             mkdir -p fsroot.docker.$d
             sudo mount --bind /mnt/fsroot.$d fsroot.docker.$d
@@ -215,14 +215,15 @@ jobs:
         env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
         run: make init
 
-      - name: make configure (PLATFORM=vpp, bookworm-only)
+      - name: make configure (PLATFORM=vpp, Debian 13/Trixie only)
         env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
-        run: NOBULLSEYE=1 NOBUSTER=1 make configure PLATFORM=vpp
+        run: NOBULLSEYE=1 NOBUSTER=1 NOBOOKWORM=1 NOTRIXIE=0 make configure PLATFORM=vpp
 
       - name: make target/sonic-vpp.img.gz
         env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
         run: |
-          NOBULLSEYE=1 NOBUSTER=1 make SONIC_BUILD_JOBS=${{ github.event.inputs.build_jobs }} \
+          NOBULLSEYE=1 NOBUSTER=1 NOBOOKWORM=1 NOTRIXIE=0 \
+            make SONIC_BUILD_JOBS=${{ github.event.inputs.build_jobs }} \
                target/sonic-vpp.img.gz
           ls -la target/sonic-vpp.img.gz
           sha256sum target/sonic-vpp.img.gz
