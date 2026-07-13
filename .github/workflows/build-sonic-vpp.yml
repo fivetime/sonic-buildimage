@@ -187,14 +187,11 @@ jobs:
           sudo docker version
           DOCKER_BUILDKIT=0 docker build --help >/dev/null
 
-      - name: Fix scapy submodule version (PEP440-valid; avoid git-hash on fresh checkout)
+      - name: Pin Scapy version to the Trixie wheel name
         run: |
           if [ -d src/scapy ]; then
-            echo "2.4.5" > src/scapy/scapy/VERSION
-            git -C src/scapy -c user.email=ci@local -c user.name=ci tag -a -f -m "v2.4.5" v2.4.5 HEAD
-            desc="$(git -C src/scapy describe --always 2>&1)"
-            echo "scapy describe => $desc"
-            case "$desc" in v2.4.5*) : ;; *) echo "ERROR: scapy tag not applied (describe=$desc)"; exit 1 ;; esac
+            echo "2.6.1.dev0" > src/scapy/scapy/VERSION
+            test "$(cat src/scapy/scapy/VERSION)" = "2.6.1.dev0"
           fi
           if [ -d src/sonic-frr/frr ]; then
             git -C src/sonic-frr/frr update-ref refs/remotes/origin/frr-10.3 HEAD
