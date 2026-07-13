@@ -68,12 +68,15 @@ jobs:
             || { echo "ERROR: platform/vpp is empty — submodule not checked out"; exit 1; }
           ls -la platform/vpp | head
 
-      - name: Use UEFI-capable ONIE recovery image
+      - name: Build only the published BIOS KVM image
         run: |
           set -eux
-          ONIE_RULES=platform/vpp/rules/onie.mk
-          sed -i '/^$(ONIE_RECOVERY_IMAGE)_URL/ s#/public/onie/#/public/onie/efi/#' "$ONIE_RULES"
-          grep -F '$(ONIE_RECOVERY_IMAGE)_URL = "https://packages.trafficmanager.net/public/onie/efi/onie-recovery-x86_64-kvm_x86_64-r0.iso"' "$ONIE_RULES"
+          sed -i '/^[[:space:]]*generate_kvm_image 1 UEFI$/d' build_image.sh
+          grep -q '^[[:space:]]*generate_kvm_image 1$' build_image.sh
+          if grep -q 'generate_kvm_image 1 UEFI' build_image.sh; then
+            echo "ERROR: failed to disable the unpublished UEFI KVM variant" >&2
+            exit 1
+          fi
 
       # ---- GitHub-hosted only: push the biggest build outputs onto the 70GB /mnt disk ----
       - name: Relocate heavy build dirs to /mnt (bind mounts, NOT symlinks)
