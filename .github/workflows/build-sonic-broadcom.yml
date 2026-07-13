@@ -11,15 +11,6 @@ name: build-sonic-broadcom
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        # Free text so any current/future branch or tag works with no list to maintain.
-        # Alternatively you can drop this input entirely and use the web UI's native
-        # "Use workflow from" ref selector — but that requires this workflow file to also
-        # exist on the target branch, whereas free-text builds any branch from master.
-        description: 'branch/tag to build (any name, e.g. 202505, 202511, master)'
-        type: string
-        default: '202505'
-        required: true
       platform:
         description: 'SONiC PLATFORM'
         default: 'broadcom'
@@ -35,14 +26,14 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ github.event.inputs.runner_label }}
+    runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 350          # just under GitHub's 6h hard cap
     permissions:
       contents: write            # gh release create needs write access to publish the .bin
     steps:
       # ---- GitHub-hosted only: reclaim disk (frees ~30GB of preinstalled toolchains) ----
       - name: Free up disk space
-        if: startsWith(github.event.inputs.runner_label, 'ubuntu')
+        if: startsWith(inputs.runner_label, 'ubuntu')
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -56,13 +47,12 @@ jobs:
       - name: Checkout (with submodules)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.branch }}
           submodules: recursive
           fetch-depth: 1
 
       # ---- GitHub-hosted only: push the biggest build outputs onto the 70GB /mnt disk ----
       - name: Relocate heavy build dirs to /mnt (bind mounts, NOT symlinks)
-        if: startsWith(github.event.inputs.runner_label, 'ubuntu')
+        if: startsWith(inputs.runner_label, 'ubuntu')
         run: |
           set -eux
           echo "docker version on runner:"; docker --version
@@ -102,7 +92,7 @@ jobs:
           # rules/config.user overrides rules/config
           cat > rules/config.user <<EOF
           INCLUDE_ICCPD = y
-          SONIC_BUILD_JOBS = ${{ github.event.inputs.build_jobs }}
+          SONIC_BUILD_JOBS = ${{ inputs.build_jobs }}
           BUILD_SKIP_TEST = y
           EOF
           # also flip the default in rules/config in case config.user isn't honoured on this branch
@@ -176,7 +166,7 @@ jobs:
       # denied). Ubuntu noble's docker.io=24.x still has the legacy builder that resolves
       # local images, matching the proven-good build server. Pin to it. ----
       - name: Pin Docker to 24 (noble) — BuildKit>=25 can't FROM local slave images
-        if: startsWith(github.event.inputs.runner_label, 'ubuntu')
+        if: startsWith(inputs.runner_label, 'ubuntu')
         run: |
           set -eux
           docker --version
@@ -215,21 +205,21 @@ jobs:
 
       - name: make configure
         env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
-        run: make configure PLATFORM=${{ github.event.inputs.platform }}
+        run: make configure PLATFORM=${{ inputs.platform }}
 
       - name: make target/sonic-broadcom.bin
         env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
         run: |
-          make SONIC_BUILD_JOBS=${{ github.event.inputs.build_jobs }} \
-               target/sonic-${{ github.event.inputs.platform }}.bin
-          ls -la target/sonic-${{ github.event.inputs.platform }}.bin
-          sha256sum target/sonic-${{ github.event.inputs.platform }}.bin
+          make SONIC_BUILD_JOBS=${{ inputs.build_jobs }} \
+               target/sonic-${{ inputs.platform }}.bin
+          ls -la target/sonic-${{ inputs.platform }}.bin
+          sha256sum target/sonic-${{ inputs.platform }}.bin
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sonic-${{ github.event.inputs.platform }}-bin
-          path: target/sonic-${{ github.event.inputs.platform }}.bin
+          name: sonic-${{ inputs.platform }}-bin
+          path: target/sonic-${{ inputs.platform }}.bin
           retention-days: 14
           if-no-files-found: error
 
@@ -240,14 +230,17 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_REF: ${{ github.ref_name }}
+          BUILD_PLATFORM: ${{ inputs.platform }}
         run: |
           set -eux
-          PLATFORM='${{ github.event.inputs.platform }}'
-          BRANCH='${{ github.event.inputs.branch }}'
+          PLATFORM="$BUILD_PLATFORM"
+          BRANCH="$BUILD_REF"
+          REF_SLUG="${BRANCH//\//-}"
           SHORT="$(git rev-parse --short HEAD)"
           STAMP="$(date -u +%Y%m%d-%H%M%S)"
-          TAG="img-${PLATFORM}-${BRANCH}-${STAMP}-r${{ github.run_number }}-${SHORT}"
-          ASSET="sonic-${PLATFORM}-${BRANCH}-${STAMP}-${SHORT}.bin"
+          TAG="img-${PLATFORM}-${REF_SLUG}-${STAMP}-r${{ github.run_number }}-${SHORT}"
+          ASSET="sonic-${PLATFORM}-${REF_SLUG}-${STAMP}-${SHORT}.bin"
           cp "target/sonic-${PLATFORM}.bin" "$ASSET"
           SHA256="$(sha256sum "$ASSET" | awk '{print $1}')"
           gh release create "$TAG" "$ASSET" --repo "${{ github.repository }}" --title "SONiC ${PLATFORM} ${BRANCH} @ ${SHORT} (${STAMP} UTC)" --notes "INCLUDE_ICCPD=y (MC-LAG). branch=${BRANCH} platform=${PLATFORM} commit=${SHORT} run=${{ github.run_id }} sha256=${SHA256}"
