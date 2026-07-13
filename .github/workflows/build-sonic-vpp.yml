@@ -68,6 +68,13 @@ jobs:
             || { echo "ERROR: platform/vpp is empty — submodule not checked out"; exit 1; }
           ls -la platform/vpp | head
 
+      - name: Use UEFI-capable ONIE recovery image
+        run: |
+          set -eux
+          ONIE_RULES=platform/vpp/rules/onie.mk
+          sed -i '/^$(ONIE_RECOVERY_IMAGE)_URL/ s#/public/onie/#/public/onie/efi/#' "$ONIE_RULES"
+          grep -F '$(ONIE_RECOVERY_IMAGE)_URL = "https://packages.trafficmanager.net/public/onie/efi/onie-recovery-x86_64-kvm_x86_64-r0.iso"' "$ONIE_RULES"
+
       # ---- GitHub-hosted only: push the biggest build outputs onto the 70GB /mnt disk ----
       - name: Relocate heavy build dirs to /mnt (bind mounts, NOT symlinks)
         if: startsWith(inputs.runner_label, 'ubuntu')
