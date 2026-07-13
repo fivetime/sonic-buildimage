@@ -21,13 +21,6 @@ name: build-sonic-vpp
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        # Free text so any current/future branch or tag works. Must carry the
-        # platform/vpp submodule (master and 202505 do).
-        description: 'branch/tag to build (needs platform/vpp submodule; e.g. master, 202505)'
-        type: string
-        default: 'master'
-        required: true
       runner_label:
         description: "Runner: 'self-hosted' (has /dev/kvm; recommended) or 'ubuntu-24.04' (GitHub-hosted, no KVM)"
         default: 'self-hosted'
@@ -39,7 +32,7 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ github.event.inputs.runner_label }}
+    runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 350          # just under GitHub's 6h hard cap
     permissions:
       contents: write            # gh release create needs write access to publish the image
@@ -51,7 +44,7 @@ jobs:
     steps:
       # ---- GitHub-hosted only: reclaim disk (frees ~30GB of preinstalled toolchains) ----
       - name: Free up disk space
-        if: startsWith(github.event.inputs.runner_label, 'ubuntu')
+        if: startsWith(inputs.runner_label, 'ubuntu')
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -65,7 +58,6 @@ jobs:
       - name: Checkout (with submodules — platform/vpp IS a submodule)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.branch }}
           submodules: recursive
           fetch-depth: 1
 
@@ -78,7 +70,7 @@ jobs:
 
       # ---- GitHub-hosted only: push the biggest build outputs onto the 70GB /mnt disk ----
       - name: Relocate heavy build dirs to /mnt (bind mounts, NOT symlinks)
-        if: startsWith(github.event.inputs.runner_label, 'ubuntu')
+        if: startsWith(inputs.runner_label, 'ubuntu')
         run: |
           set -eux
           echo "docker version on runner:"; docker --version
@@ -115,7 +107,7 @@ jobs:
           set -eux
           # No INCLUDE_ICCPD for vpp; just carry build parallelism + skip tests.
           cat > rules/config.user <<EOF
-          SONIC_BUILD_JOBS = ${{ github.event.inputs.build_jobs }}
+          SONIC_BUILD_JOBS = ${{ inputs.build_jobs }}
           BUILD_SKIP_TEST = y
           EOF
           cat rules/config.user
@@ -179,7 +171,7 @@ jobs:
       # on a LOCAL never-pushed image — Docker >=25 BuildKit tries to PULL it and fails.
       # docker.io=24.x keeps the legacy builder that resolves local images. ----
       - name: Pin Docker to 24 (noble) — BuildKit>=25 can't FROM local slave images
-        if: startsWith(github.event.inputs.runner_label, 'ubuntu')
+        if: startsWith(inputs.runner_label, 'ubuntu')
         run: |
           set -eux
           docker --version
@@ -223,7 +215,7 @@ jobs:
         env: { DOCKER_BUILDKIT: "0", BUILDKIT_PROGRESS: plain }
         run: |
           NOBULLSEYE=1 NOBUSTER=1 NOBOOKWORM=1 NOTRIXIE=0 \
-            make SONIC_BUILD_JOBS=${{ github.event.inputs.build_jobs }} \
+            make SONIC_BUILD_JOBS=${{ inputs.build_jobs }} \
                target/sonic-vpp.img.gz
           ls -la target/sonic-vpp.img.gz
           sha256sum target/sonic-vpp.img.gz
@@ -242,13 +234,15 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_REF: ${{ github.ref_name }}
         run: |
           set -eux
-          BRANCH='${{ github.event.inputs.branch }}'
+          BRANCH="$BUILD_REF"
+          REF_SLUG="${BRANCH//\//-}"
           SHORT="$(git rev-parse --short HEAD)"
           STAMP="$(date -u +%Y%m%d-%H%M%S)"
-          TAG="img-vpp-${BRANCH}-${STAMP}-r${{ github.run_number }}-${SHORT}"
-          ASSET="sonic-vpp-${BRANCH}-${STAMP}-${SHORT}.img.gz"
+          TAG="img-vpp-${REF_SLUG}-${STAMP}-r${{ github.run_number }}-${SHORT}"
+          ASSET="sonic-vpp-${REF_SLUG}-${STAMP}-${SHORT}.img.gz"
           cp "target/sonic-vpp.img.gz" "$ASSET"
           SHA256="$(sha256sum "$ASSET" | awk '{print $1}')"
           gh release create "$TAG" "$ASSET" --repo "${{ github.repository }}" --title "SONiC-VPP ${BRANCH} @ ${SHORT} (${STAMP} UTC)" --notes "PLATFORM=vpp KVM VM image (VPP/FD.io soft dataplane). branch=${BRANCH} commit=${SHORT} run=${{ github.run_id }} sha256=${SHA256}"
