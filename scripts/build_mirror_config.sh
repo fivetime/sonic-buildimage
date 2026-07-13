@@ -32,6 +32,7 @@ fi
 
 if [ "$DISTRIBUTION" == "bullseye" ]; then
     DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/
+    DEFAULT_MIRROR_SECURITY_URLS=http://deb.debian.org/debian-security/
 fi
 
 if [ "$MIRROR_SNAPSHOT" == y ]; then
@@ -46,8 +47,13 @@ if [ "$MIRROR_SNAPSHOT" == y ]; then
     DEFAULT_MIRROR_URLS=http://deb.debian.org/debian/,$BUILD_SNAPSHOT_URL/debian/$DEBIAN_TIMESTAMP/
     DEFAULT_MIRROR_SECURITY_URLS=http://deb.debian.org/debian-security/,$BUILD_SNAPSHOT_URL/debian-security/$DEBIAN_SECURITY_TIMESTAMP/
 
-	if [ "$DISTRIBUTION" == "buster" ] || [ "$DISTRIBUTION" == "bullseye" ]; then
+	if [ "$DISTRIBUTION" == "buster" ]; then
 		DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/,$BUILD_SNAPSHOT_URL/debian/$DEBIAN_TIMESTAMP/
+		DEFAULT_MIRROR_SECURITY_URLS=http://archive.debian.org/debian-security/,$BUILD_SNAPSHOT_URL/debian-security/$DEBIAN_SECURITY_TIMESTAMP/
+	fi
+	if [ "$DISTRIBUTION" == "bullseye" ]; then
+		DEFAULT_MIRROR_URLS=http://archive.debian.org/debian/,$BUILD_SNAPSHOT_URL/debian/$DEBIAN_TIMESTAMP/
+		DEFAULT_MIRROR_SECURITY_URLS=http://deb.debian.org/debian-security/,$BUILD_SNAPSHOT_URL/debian-security/$DEBIAN_SECURITY_TIMESTAMP/
 	fi
 
     mkdir -p target/versions/default
