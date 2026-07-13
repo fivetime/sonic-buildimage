@@ -347,3 +347,12 @@ class Chassis(ChassisBase):
             return color if color else self.STATUS_LED_COLOR_GREEN
         except Exception:
             return self.STATUS_LED_COLOR_GREEN
+
+    def get_position_in_parent(self):
+        """
+        Retrieves 1-based relative physical position in parent device.
+        Returns:
+            integer: The 1-based relative physical position in parent
+            device or -1 if cannot determine the position
+        """
+        return -1
